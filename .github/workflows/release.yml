@@ -60,12 +60,19 @@ jobs:
         with:
           workspaces: src-tauri
 
-      # Shell release: don't bundle the (gitignored) model resource. The app
-      # spawns a local Python backend, which fetches the model on first run.
-      # (Keep createUpdaterArtifacts=true from the base config — this build is signed.)
-      - name: Prepare config for shell build
+      # Freeze the Flask backend into a self-contained sidecar. CPU/MPS torch (not
+      # CUDA) keeps it under GitHub's 2GB release-asset limit and works on macOS.
+      # The model is NOT bundled — the sidecar downloads it on first run (see app.py).
+      # tauri.conf.json bundles sidecar/vr-backend/ as the app's backend/ resource.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build backend sidecar
         shell: bash
-        run: node -e "const f='src-tauri/tauri.conf.json',fs=require('fs'),j=JSON.parse(fs.readFileSync(f));delete j.bundle.resources;fs.writeFileSync(f,JSON.stringify(j,null,2))"
+        run: |
+          python -m pip install --upgrade pip
+          pip install flask "audio-separator[cpu]" static-ffmpeg pyinstaller
+          pyinstaller vr-backend.spec --distpath sidecar --noconfirm
 
       - name: Resolve release id
         id: rel

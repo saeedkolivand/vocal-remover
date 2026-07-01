@@ -71,34 +71,34 @@ the first-run download shows live MB instead of a frozen window. `/separate` ret
 
 ## Distribute (standalone — no Python/dev setup on the target)
 
-For the fully self-contained build (bundled Python + PyTorch + CUDA + model),
-freeze the sidecar and bundle it. Best on machines with an **NVIDIA GPU + driver**:
+The released installers are **self-contained**: `release.yml` freezes `app.py` into a
+[PyInstaller] sidecar (bundled via `tauri.conf.json` as the app's `backend/` resource)
+so the target needs no Python. To keep it under GitHub's 2 GB release-asset limit and
+run on macOS, the sidecar uses **CPU/MPS torch, not CUDA** — the model is *not* bundled;
+it downloads on first run (see above). Build the same thing on demand with the
+`desktop-build` workflow.
+
+**NVIDIA "power build" (fastest, biggest):** freeze with the CUDA torch wheel locally
+— multi-GB, so host it off GitHub (or ship the ready-made portable folder in
+**`release-portable/vocal-remover/`**: copy to any NVIDIA machine, run `app.exe`):
 
 ```sh
-pyinstaller vr-backend.spec --distpath sidecar          # freeze the backend (~4.8 GB)
+pyinstaller vr-backend.spec --distpath sidecar          # freeze the backend (~4.8 GB w/ CUDA)
 cargo build --release --manifest-path src-tauri/Cargo.toml
-# then place next to the shell:  app.exe + backend/ (the sidecar) + models/
+# then place next to the shell:  app.exe + backend/ (the sidecar)
 ```
-
-A ready-to-run portable build lives in **`release-portable/vocal-remover/`** —
-copy that folder to any NVIDIA machine and run `app.exe`. No install, no Python.
-First launch copies the model into `%LOCALAPPDATA%\VocalRemover` once, then it's
-instant.
-
-> The signed `release.yml` installers are **shells** (no sidecar/model) — the
-> self-contained sidecar bundle is not wired into CI yet (it's multi-GB and
-> per-OS). Build it locally as above, or extend `release.yml` to run PyInstaller.
 
 [PyInstaller]: https://pyinstaller.org
 
 ## Releases & auto-update (CI)
 
-Two GitHub Actions workflows:
+Three GitHub Actions workflows:
 
 | Workflow | Trigger | Does |
 |----------|---------|------|
-| `.github/workflows/build.yml` | PRs, non-`main` pushes | Compile-check on macOS + Windows, uploads unsigned installers as artifacts |
-| `.github/workflows/release.yml` | push to `main` | [semantic-release] cuts a version from the commits, then builds **signed** installers + updater artifacts on both OSes and attaches them (incl. `latest.json`) to the GitHub Release |
+| `.github/workflows/build.yml` | PRs, non-`main` pushes | Fast compile-check on macOS + Windows (shell only), uploads unsigned installers as artifacts |
+| `.github/workflows/desktop-build.yml` | manual | Builds the **self-contained** installers (CPU sidecar) as artifacts — no release, no version bump |
+| `.github/workflows/release.yml` | push to `main` | [semantic-release] cuts a version, then builds **signed self-contained** installers + updater artifacts on both OSes and attaches them (incl. `latest.json`) to the GitHub Release |
 
 **Versioning is commit-driven** ([Conventional Commits]): `fix:` → patch,
 `feat:` → minor, `feat!:`/`BREAKING CHANGE:` → major. Commits that aren't

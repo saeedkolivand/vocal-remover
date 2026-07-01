@@ -31,9 +31,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Shell build: don't bundle the (gitignored) model resource, and skip
-      # updater artifacts (those need TAURI_SIGNING_PRIVATE_KEY — release.yml only).
-      # The resulting app spawns a local Python backend, which fetches the model.
+      # Shell build: drop the sidecar resource (not built here) and skip updater
+      # artifacts (those need TAURI_SIGNING_PRIVATE_KEY — release.yml only). The
+      # resulting app spawns a local Python backend, which fetches the model.
       - name: Prepare config for shell build
         shell: bash
         run: node -e "const f='src-tauri/tauri.conf.json',fs=require('fs'),j=JSON.parse(fs.readFileSync(f));delete j.bundle.resources;j.bundle.createUpdaterArtifacts=false;fs.writeFileSync(f,JSON.stringify(j,null,2))"

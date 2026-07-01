@@ -1,0 +1,62 @@
+name: desktop-build
+
+# On-demand, self-contained installers (CPU sidecar bundled, model downloaded at
+# runtime). Unsigned, uploaded as workflow artifacts — no release, no version bump.
+# Use it to build/smoke-test installers without cutting a release; release.yml does
+# the signed, auto-updating releases.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build backend sidecar (CPU torch)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install flask "audio-separator[cpu]" static-ffmpeg pyinstaller
+          pyinstaller vr-backend.spec --distpath sidecar --noconfirm
+          echo "sidecar size:"; du -sh sidecar/vr-backend
+
+      - run: pnpm install --frozen-lockfile
+
+      # No signing key here → disable updater artifacts (keep the sidecar resource).
+      - name: Disable updater artifacts
+        shell: bash
+        run: node -e "const f='src-tauri/tauri.conf.json',fs=require('fs'),j=JSON.parse(fs.readFileSync(f));j.bundle.createUpdaterArtifacts=false;fs.writeFileSync(f,JSON.stringify(j,null,2))"
+
+      - name: Build
+        run: pnpm exec tauri build
+
+      - name: Report bundle sizes
+        shell: bash
+        run: du -sh src-tauri/target/release/bundle/* || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vocal-remover-selfcontained-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+          if-no-files-found: warn

@@ -41,5 +41,8 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="vr-backend", console=True)
+# console=False: no console window pops up behind the desktop app. Startup/model
+# errors still surface via the backend's /status endpoint (app.py). Flip to True
+# to debug a frozen build that never reaches Flask (e.g. an import error).
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="vr-backend", console=False)
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="vr-backend")

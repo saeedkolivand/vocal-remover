@@ -36,9 +36,7 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "resources": {
-      "../models/mel_band_roformer_kim_ft_unwa.ckpt": "models/mel_band_roformer_kim_ft_unwa.ckpt",
-      "../models/config_mel_band_roformer_kim_ft_unwa.yaml": "models/config_mel_band_roformer_kim_ft_unwa.yaml",
-      "../models/download_checks.json": "models/download_checks.json"
+      "../sidecar/vr-backend/": "backend/"
     },
     "icon": [
       "icons/32x32.png",
