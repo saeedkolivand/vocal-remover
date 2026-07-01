@@ -64,8 +64,32 @@ fn spawn_sidecar(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
+            // Auto-update: on launch, check the GitHub release feed; if a newer
+            // signed build exists, download+install and relaunch. Failures (offline,
+            // no release yet, dev) are logged and ignored so they never block startup.
+            let up = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                use tauri_plugin_updater::UpdaterExt;
+                match up.updater() {
+                    Ok(updater) => match updater.check().await {
+                        Ok(Some(update)) => {
+                            eprintln!("updater: installing {}", update.version);
+                            if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
+                                eprintln!("updater: install failed: {e}");
+                            } else {
+                                up.restart();
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(e) => eprintln!("updater: check failed: {e}"),
+                    },
+                    Err(e) => eprintln!("updater: unavailable: {e}"),
+                }
+            });
+
             // Look for the bundled backend/model in the installer's resource dir OR next
             // to the exe (portable zip). Neither exists in dev → fall back to venv python.
             let mut roots: Vec<PathBuf> = Vec::new();

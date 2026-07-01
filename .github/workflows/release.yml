@@ -1,0 +1,83 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  # 1. semantic-release reads conventional commits, bumps versions (via
+  #    scripts/bump-version.mjs), tags, and creates the GitHub Release.
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.semantic.outputs.new_release_published }}
+      version: ${{ steps.semantic.outputs.new_release_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: cycjimmy/semantic-release-action@v4
+        id: semantic
+        with:
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/exec
+            @semantic-release/git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 2. Only when a release was cut: build signed installers + updater artifacts
+  #    on each OS and attach them (incl. latest.json) to that release.
+  bundle:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Shell release: don't bundle the (gitignored) model resource. The app
+      # spawns a local Python backend, which fetches the model on first run.
+      # (Keep createUpdaterArtifacts=true from the base config — this build is signed.)
+      - name: Prepare config for shell build
+        shell: bash
+        run: node -e "const f='src-tauri/tauri.conf.json',fs=require('fs'),j=JSON.parse(fs.readFileSync(f));delete j.bundle.resources;fs.writeFileSync(f,JSON.stringify(j,null,2))"
+
+      - name: Resolve release id
+        id: rel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "id=$(gh release view v${{ needs.release.outputs.version }} --json databaseId -q .databaseId)" >> "$GITHUB_OUTPUT"
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ steps.rel.outputs.id }}

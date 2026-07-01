@@ -1,8 +1,10 @@
 name: build
 
+# Compile-check + unsigned installers on branches/PRs. Releases (tags on main,
+# signed + updater artifacts) are handled by release.yml.
 on:
   push:
-    branches: [main]
+    branches-ignore: [main]
   pull_request:
   workflow_dispatch:
 
@@ -29,20 +31,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # The ML model (~870MB) is gitignored and only needed for the full
-      # self-contained bundle. tauri.conf.json lists it under bundle.resources,
-      # so create empty placeholders here just to let bundling succeed. These
-      # installers are compile-check artifacts and still need a local Python
-      # backend (app.py) to run. ponytail: placeholders, drop when CI bundles the real model.
-      - name: Stub bundled model resources
+      # Shell build: don't bundle the (gitignored) model resource, and skip
+      # updater artifacts (those need TAURI_SIGNING_PRIVATE_KEY — release.yml only).
+      # The resulting app spawns a local Python backend, which fetches the model.
+      - name: Prepare config for shell build
         shell: bash
-        run: |
-          mkdir -p models
-          touch models/mel_band_roformer_kim_ft_unwa.ckpt \
-                models/config_mel_band_roformer_kim_ft_unwa.yaml \
-                models/download_checks.json
+        run: node -e "const f='src-tauri/tauri.conf.json',fs=require('fs'),j=JSON.parse(fs.readFileSync(f));delete j.bundle.resources;j.bundle.createUpdaterArtifacts=false;fs.writeFileSync(f,JSON.stringify(j,null,2))"
 
-      - run: pnpm exec tauri build
+      - name: Build
+        run: pnpm exec tauri build
 
       - uses: actions/upload-artifact@v4
         with:

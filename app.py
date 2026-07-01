@@ -56,18 +56,55 @@ MODEL = os.environ.get("MODEL", "mel_band_roformer_kim_ft_unwa.ckpt")
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024  # 300 MB upload cap
 
-print(f"Loading {MODEL} (downloads ~200 MB on first run)...")
-separator = Separator(
-    output_format="flac",          # lossless — avoids the second lossy pass MP3 adds
-    output_dir=str(OUT),
-    model_file_dir=str(MODELS),    # stable cache, not /tmp
-    # `overlap` is the chunk STEP in seconds: lower = more overlap = fewer seam
-    # artifacts (and slower). ~2s step on ~6s chunks ≈ 66% overlap; the 4090 eats it.
-    mdxc_params={"segment_size": 256, "override_model_segment_size": False,
-                 "batch_size": 1, "overlap": 2, "pitch_shift": 0},
-)
-separator.load_model(model_filename=MODEL)
-print("Model ready.")
+# The model loads (and, on first run, downloads ~200 MB+) in a background thread so
+# Flask serves immediately and the UI can show progress via /status instead of a
+# frozen window. split() and /separate wait on MODEL_READY.
+separator = None
+MODEL_READY = threading.Event()
+status = {"ready": False, "phase": "starting", "downloaded_mb": 0.0, "error": None}
+
+
+def _watch_download():
+    """Best-effort first-run download progress: sum the model file(s) growing in MODELS.
+    ponytail: byte count off disk — robust across audio-separator versions; no % since we
+    don't know the total. Add a total (from download_checks.json) if a real bar is wanted."""
+    stem = MODEL.rsplit(".", 1)[0]
+    while status["phase"] == "downloading":
+        try:
+            mb = sum(f.stat().st_size for f in MODELS.iterdir()
+                     if f.is_file() and stem in f.name) / 1048576
+            status["downloaded_mb"] = round(mb, 1)
+        except OSError:
+            pass
+        time.sleep(0.5)
+
+
+def _load_model():
+    global separator
+    try:
+        cached = (MODELS / MODEL).exists()
+        status["phase"] = "loading" if cached else "downloading"
+        if not cached:
+            threading.Thread(target=_watch_download, daemon=True).start()
+        sep = Separator(
+            output_format="flac",          # lossless — avoids the second lossy pass MP3 adds
+            output_dir=str(OUT),
+            model_file_dir=str(MODELS),    # stable cache, not /tmp
+            # `overlap` is the chunk STEP in seconds: lower = more overlap = fewer seam
+            # artifacts (and slower). ~2s step on ~6s chunks ≈ 66% overlap; the 4090 eats it.
+            mdxc_params={"segment_size": 256, "override_model_segment_size": False,
+                         "batch_size": 1, "overlap": 2, "pitch_shift": 0},
+        )
+        sep.load_model(model_filename=MODEL)
+        separator = sep
+        status.update(phase="ready", ready=True)
+    except Exception as e:
+        status.update(phase="error", error=str(e))
+    finally:
+        MODEL_READY.set()  # unblock waiters whether we succeeded or errored
+
+
+threading.Thread(target=_load_model, daemon=True).start()
 
 # ponytail: one GPU, so serialize jobs with a lock — also guards the shared
 # separator.output_dir we set per job. Add a real queue only if this ever
@@ -82,6 +119,9 @@ def split(in_path: pathlib.Path, out_dir: pathlib.Path) -> dict:
     changing MODEL or output_format can't mislabel or silently drop a stem. The
     gpu_lock serializes jobs (one GPU) and guards the shared separator output_dir.
     """
+    MODEL_READY.wait()  # first job may arrive before the model finishes loading
+    if separator is None:
+        raise RuntimeError(status["error"] or "model failed to load")
     with gpu_lock:
         produced = separator.separate(str(in_path))
     # Resolve to real paths (separate() returns names relative to output_dir).
@@ -100,13 +140,75 @@ def split(in_path: pathlib.Path, out_dir: pathlib.Path) -> dict:
     return moved
 
 
+LOADING_HTML = """<!doctype html><meta charset=utf-8>
+<title>Vocal Remover</title>
+<style>
+  *{box-sizing:border-box;margin:0}html,body{height:100%}
+  body{background:oklch(0.15 0.012 235);color:oklch(0.97 0.005 235);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:grid;place-items:center;height:100vh;overflow:hidden}
+  .aurora{position:fixed;inset:-30vmax;z-index:0;pointer-events:none;
+    background:radial-gradient(40vmax 40vmax at 35% 35%,oklch(0.72 0.19 35/0.20),transparent 60%),
+      radial-gradient(42vmax 42vmax at 68% 65%,oklch(0.80 0.13 205/0.18),transparent 62%);
+    filter:blur(40px);animation:drift 34s linear infinite}
+  @keyframes drift{to{transform:rotate(360deg)}}
+  .wrap{position:relative;z-index:1;text-align:center;width:min(90vw,380px)}
+  .dot{width:18px;height:18px;border-radius:50%;margin:0 auto 1.6rem;background:oklch(0.82 0.17 52);
+    box-shadow:0 0 18px oklch(0.82 0.17 52),0 0 44px oklch(0.72 0.19 35);
+    animation:pulse 1.6s cubic-bezier(0.16,1,0.3,1) infinite}
+  @keyframes pulse{0%,100%{transform:scale(.7);opacity:.5}50%{transform:scale(1);opacity:1}}
+  h1{font-size:1.5rem;font-weight:700;letter-spacing:-0.02em}
+  p{margin-top:.5rem;color:oklch(0.74 0.012 235);font-size:.9rem}
+  .bar{margin-top:1.2rem;height:4px;border-radius:99px;background:oklch(0.30 0.02 235);overflow:hidden}
+  .bar>i{display:block;height:100%;width:35%;border-radius:99px;background:oklch(0.82 0.17 52);
+    animation:slide 1.4s ease-in-out infinite}
+  @keyframes slide{0%{margin-left:-40%}100%{margin-left:100%}}
+  @media (prefers-reduced-motion:reduce){.aurora,.dot,.bar>i{animation:none}}
+</style>
+<div class=aurora></div>
+<div class=wrap>
+  <div class=dot></div>
+  <h1 id=t>Starting Vocal Remover…</h1>
+  <p id=m>Warming up the engine.</p>
+  <div class=bar><i></i></div>
+</div>
+<script>
+const t=document.getElementById('t'),m=document.getElementById('m');
+async function tick(){
+  try{
+    const s=await (await fetch('/status',{cache:'no-store'})).json();
+    if(s.ready){location.reload();return}
+    if(s.phase==='downloading'){t.textContent='Downloading AI model…';
+      m.textContent='One-time download'+(s.downloaded_mb?' — '+s.downloaded_mb+' MB':'')+'. This can take a minute.';}
+    else if(s.phase==='loading'){t.textContent='Loading model…';m.textContent='Almost there.';}
+    else if(s.phase==='error'){t.textContent='Failed to start';
+      m.textContent=s.error||'The backend could not load the model.';return;}
+  }catch(e){/* backend still booting */}
+  setTimeout(tick,600);
+}
+tick();
+</script>
+"""
+
+
 @app.get("/")
 def index():
+    # Until the model is ready, serve a same-origin progress page that polls /status
+    # and reloads into the app once ready (no CORS/cross-scheme fetch from the shell).
+    if not status["ready"]:
+        return LOADING_HTML
     return send_file(BASE / "index.html")
+
+
+@app.get("/status")
+def status_route():
+    return jsonify(status)
 
 
 @app.post("/separate")
 def separate():
+    if not status["ready"]:
+        return jsonify(error="model still loading", status=status), 503
     f = request.files.get("audio")
     if not f or not f.filename:
         return jsonify(error="no audio file"), 400
