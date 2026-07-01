@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/saeedkolivand/vocal-remover/compare/v1.2.0...v1.2.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* revert Windows to CPU torch — DirectML crashes on RoFormer ([b8eb1d4](https://github.com/saeedkolivand/vocal-remover/commit/b8eb1d4f0fb30a6dee740b29f01463af7b4a0fe3))
+
 # [1.2.0](https://github.com/saeedkolivand/vocal-remover/compare/v1.1.1...v1.2.0) (2026-07-01)
 
 
