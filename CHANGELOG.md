@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/saeedkolivand/vocal-remover/compare/v1.1.1...v1.2.0) (2026-07-01)
+
+
+### Features
+
+* DirectML GPU acceleration for the Windows build ([2dc8c49](https://github.com/saeedkolivand/vocal-remover/commit/2dc8c4937f86899f16c32bdb5a01c8e60321884f))
+
 ## [1.1.1](https://github.com/saeedkolivand/vocal-remover/compare/v1.1.0...v1.1.1) (2026-07-01)
 
 
