@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/saeedkolivand/vocal-remover/compare/v1.1.0...v1.1.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* sidecar crash on launch — stdout is None in windowed PyInstaller build ([1199451](https://github.com/saeedkolivand/vocal-remover/commit/11994514f9ef5dda7542587374483b248be574c5))
+
 # [1.1.0](https://github.com/saeedkolivand/vocal-remover/compare/v1.0.0...v1.1.0) (2026-07-01)
 
 
