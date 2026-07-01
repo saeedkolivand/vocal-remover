@@ -9,6 +9,7 @@ datas, binaries, hiddenimports = [], [], []
 # torch / onnxruntime / numpy / scipy are handled by PyInstaller's built-in hooks.
 for pkg in (
     "audio_separator", "static_ffmpeg",
+    "torch_directml",  # Windows GPU (any vendor) via DirectX; absent on the mac/cpu build (skipped)
     "rotary_embedding_torch", "einops", "ml_collections", "beartype",
     "librosa", "soundfile", "soxr", "samplerate", "resampy",
     "demucs", "julius", "lameenc", "diffq", "omegaconf", "dora_search",
