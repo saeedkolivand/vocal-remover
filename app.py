@@ -7,6 +7,16 @@ Engine: Mel-Band RoFormer "Kim FT" (see MODEL below). Runs on PyTorch CUDA.
 """
 import os, sys, json, time, shutil, pathlib, threading, uuid
 
+# PyInstaller windowed build (console=False) sets sys.stdout/stderr to None, so any
+# library that prints — static_ffmpeg's first-run downloader, audio-separator's
+# logging — crashes on .write before Flask even starts. Point them at a log file so
+# the writes succeed (and we get a packaged-run log). ponytail: only when there's no console.
+if sys.stdout is None or sys.stderr is None:
+    import tempfile
+    _log = open(os.path.join(tempfile.gettempdir(), "vocal-remover-backend.log"), "a", buffering=1)
+    sys.stdout = sys.stdout or _log
+    sys.stderr = sys.stderr or _log
+
 import static_ffmpeg
 static_ffmpeg.add_paths()  # ffmpeg on PATH for decode + flac encode
 
