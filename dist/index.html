@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vocal Remover</title>
+<style>
+  *{ box-sizing:border-box; margin:0; }
+  html,body{ height:100%; }
+  body{
+    background: oklch(0.15 0.012 235);
+    color: oklch(0.97 0.005 235);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display:grid; place-items:center; height:100vh; overflow:hidden;
+  }
+  .aurora{
+    position:fixed; inset:-30vmax; z-index:0; pointer-events:none;
+    background:
+      radial-gradient(40vmax 40vmax at 35% 35%, oklch(0.72 0.19 35 / 0.20), transparent 60%),
+      radial-gradient(42vmax 42vmax at 68% 65%, oklch(0.80 0.13 205 / 0.18), transparent 62%);
+    filter: blur(40px); animation: drift 34s linear infinite;
+  }
+  @keyframes drift{ to{ transform: rotate(360deg); } }
+  .wrap{ position:relative; z-index:1; text-align:center; }
+  .dot{
+    width:18px; height:18px; border-radius:50%; margin:0 auto 1.6rem;
+    background: oklch(0.82 0.17 52);
+    box-shadow: 0 0 18px oklch(0.82 0.17 52), 0 0 44px oklch(0.72 0.19 35);
+    animation: pulse 1.6s cubic-bezier(0.16,1,0.3,1) infinite;
+  }
+  @keyframes pulse{ 0%,100%{ transform:scale(.7); opacity:.5; } 50%{ transform:scale(1); opacity:1; } }
+  h1{ font-size:1.5rem; font-weight:700; letter-spacing:-0.02em; }
+  p{ margin-top:.5rem; color: oklch(0.74 0.012 235); font-size:.9rem; }
+  @media (prefers-reduced-motion: reduce){ .aurora,.dot{ animation:none; } }
+</style>
+</head>
+<body>
+  <div class="aurora"></div>
+  <div class="wrap">
+    <div class="dot"></div>
+    <h1>Starting Vocal Remover…</h1>
+    <p>Loading the AI model on your GPU. One moment.</p>
+  </div>
+</body>
+</html>

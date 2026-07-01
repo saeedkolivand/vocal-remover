@@ -1,0 +1,55 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      # The ML model (~870MB) is gitignored and only needed for the full
+      # self-contained bundle. tauri.conf.json lists it under bundle.resources,
+      # so create empty placeholders here just to let bundling succeed. These
+      # installers are compile-check artifacts and still need a local Python
+      # backend (app.py) to run. ponytail: placeholders, drop when CI bundles the real model.
+      - name: Stub bundled model resources
+        shell: bash
+        run: |
+          mkdir -p models
+          touch models/mel_band_roformer_kim_ft_unwa.ckpt \
+                models/config_mel_band_roformer_kim_ft_unwa.yaml \
+                models/download_checks.json
+
+      - run: pnpm exec tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vocal-remover-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.app
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+          if-no-files-found: warn

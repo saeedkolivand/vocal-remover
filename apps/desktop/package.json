@@ -1,0 +1,8 @@
+{
+  "name": "desktop",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -C ../.. exec tauri dev",
+    "build": "pnpm -C ../.. exec tauri build"
+  }
+}

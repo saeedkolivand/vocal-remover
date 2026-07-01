@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vocal Remover — local</title>
+<style>
+  :root{
+    --bg:      oklch(0.15 0.012 235);
+    --bg-2:    oklch(0.19 0.015 235);
+    --surface: oklch(0.22 0.016 235 / 0.65);
+    --line:    oklch(0.40 0.02 235 / 0.35);
+    --ink:     oklch(0.97 0.005 235);
+    --muted:   oklch(0.74 0.012 235);
+    --vocals:  oklch(0.82 0.17 52);
+    --vocals-2:oklch(0.72 0.19 35);
+    --instr:   oklch(0.84 0.13 205);
+    --instr-2: oklch(0.74 0.14 222);
+    --expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --z-grain: 60; --z-aurora: -1; --z-content: 1;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; }
+  body{
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height:100vh;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+    position:relative;
+  }
+  .mono{ font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace; }
+
+  /* cinematic background: slow rotating duotone glow + film grain */
+  .aurora{
+    position:fixed; inset:-30vmax; z-index:var(--z-aurora); pointer-events:none;
+    background:
+      radial-gradient(40vmax 40vmax at 30% 30%, oklch(0.72 0.19 35 / 0.22), transparent 60%),
+      radial-gradient(42vmax 42vmax at 72% 68%, oklch(0.80 0.13 205 / 0.20), transparent 62%),
+      radial-gradient(60vmax 60vmax at 50% 120%, oklch(0.5 0.05 235 / 0.25), transparent 70%);
+    filter: blur(40px) saturate(1.1);
+    animation: drift 34s linear infinite;
+  }
+  @keyframes drift{ to{ transform: rotate(360deg); } }
+  .grain{
+    position:fixed; inset:0; z-index:var(--z-grain); pointer-events:none; opacity:.05;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+  }
+
+  main{
+    position:relative; z-index:var(--z-content);
+    max-width:1080px; margin:0 auto; padding:clamp(1.5rem,4vw,3rem);
+    min-height:100vh; display:flex; flex-direction:column;
+  }
+
+  .brand{ display:flex; align-items:center; gap:.7rem; }
+  .brand .dot{
+    width:.7rem; height:.7rem; border-radius:50%;
+    background: var(--vocals);
+    box-shadow:0 0 12px var(--vocals), 0 0 28px var(--vocals-2);
+    animation: pulse 2.4s var(--expo) infinite;
+  }
+  @keyframes pulse{ 0%,100%{ opacity:.55; transform:scale(.85);} 50%{ opacity:1; transform:scale(1);} }
+  .brand .label{ font-size:.82rem; letter-spacing:.32em; text-transform:uppercase; color:var(--muted); }
+
+  #stage{ flex:1; display:flex; align-items:center; justify-content:center; padding:clamp(2rem,6vh,5rem) 0; }
+  .view{ width:100%; }
+  .view[hidden]{ display:none; }
+
+  /* ---------- upload ---------- */
+  #view-upload{ text-align:center; max-width:760px; margin:0 auto; }
+  h1{
+    font-size:clamp(2.6rem, 8vw, 5.5rem);
+    line-height:.96; font-weight:800; letter-spacing:-0.04em;
+    text-wrap:balance;
+    background: none; color:var(--ink);
+  }
+  h1 .accent{ color:var(--vocals); }
+  .lede{
+    margin:1.1rem auto 0; max-width:46ch; color:var(--muted);
+    font-size:clamp(1rem,1.6vw,1.18rem); line-height:1.5; text-wrap:pretty;
+  }
+  .reveal{ opacity:0; transform:translateY(18px); animation: rise .9s var(--expo) forwards; }
+  .reveal.d1{ animation-delay:.05s; } .reveal.d2{ animation-delay:.16s; }
+  .reveal.d3{ animation-delay:.28s; } .reveal.d4{ animation-delay:.4s; }
+  @keyframes rise{ to{ opacity:1; transform:none; } }
+
+  #drop{
+    display:block; margin:2.6rem auto 0; max-width:560px;
+    border:1.5px dashed var(--line); border-radius:20px;
+    padding:clamp(2rem,5vw,3.4rem) 2rem;
+    background: var(--surface);
+    backdrop-filter: blur(8px);
+    cursor:pointer; position:relative; overflow:hidden;
+    transition: border-color .4s var(--expo), transform .4s var(--expo), box-shadow .4s var(--expo);
+  }
+  #drop::before{
+    content:""; position:absolute; inset:0; border-radius:20px; pointer-events:none;
+    box-shadow: inset 0 0 60px oklch(0.82 0.17 52 / 0); transition: box-shadow .5s var(--expo);
+  }
+  #drop:hover, #drop.drag{ border-color: var(--vocals); transform: translateY(-2px); }
+  #drop:hover::before, #drop.drag::before{ box-shadow: inset 0 0 70px oklch(0.82 0.17 52 / .12); }
+  #drop.drag{ box-shadow:0 18px 60px oklch(0.72 0.19 35 / .18); }
+  .drop-icon{
+    width:60px; height:60px; margin:0 auto 1rem; border-radius:50%;
+    display:grid; place-items:center;
+    background: radial-gradient(circle at 50% 35%, oklch(0.72 0.19 35 / .9), oklch(0.55 0.16 30 / .35));
+    box-shadow:0 0 30px oklch(0.72 0.19 35 / .35);
+    animation: breathe 3.2s var(--expo) infinite;
+  }
+  @keyframes breathe{ 0%,100%{ transform:scale(1);} 50%{ transform:scale(1.06);} }
+  .drop-icon svg{ width:26px; height:26px; stroke:var(--ink); fill:none; stroke-width:2; }
+  .drop-title{ font-size:1.15rem; font-weight:600; }
+  .drop-sub{ margin-top:.35rem; color:var(--muted); font-size:.92rem; }
+
+  #filebar{ margin:1.6rem auto 0; max-width:560px; display:flex; gap:.8rem; align-items:center; justify-content:center; flex-wrap:wrap; }
+  #filebar .fname{ color:var(--muted); font-size:.9rem; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .btn{
+    border:none; border-radius:12px; cursor:pointer; font:inherit; font-weight:650;
+    padding:.85rem 1.6rem; color:oklch(0.18 0.02 40); letter-spacing:.01em;
+    background: linear-gradient(180deg, var(--vocals), var(--vocals-2));
+    box-shadow:0 8px 24px oklch(0.72 0.19 35 / .28);
+    transition: transform .35s var(--expo), box-shadow .35s var(--expo), filter .35s var(--expo);
+  }
+  .btn:hover{ transform:translateY(-2px); filter:brightness(1.06); box-shadow:0 12px 34px oklch(0.72 0.19 35 / .4); }
+  .btn:active{ transform:translateY(0); }
+  .btn.ghost{
+    background:transparent; color:var(--ink); border:1px solid var(--line); box-shadow:none;
+  }
+  .btn.ghost:hover{ border-color:var(--ink); }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; transform:none; filter:none; }
+
+  /* ---------- processing ---------- */
+  #view-processing{ text-align:center; max-width:620px; margin:0 auto; }
+  .bars{ display:flex; gap:6px; height:90px; align-items:flex-end; justify-content:center; margin:0 auto 1.8rem; }
+  .bars i{
+    width:8px; border-radius:6px; display:block;
+    background: linear-gradient(180deg, var(--vocals), var(--instr));
+    animation: eq 1.05s var(--expo) infinite; transform-origin:bottom;
+  }
+  @keyframes eq{ 0%,100%{ transform:scaleY(.22);} 50%{ transform:scaleY(1);} }
+  #view-processing h2{ font-size:1.6rem; font-weight:700; letter-spacing:-0.02em; }
+  #view-processing p{ margin-top:.6rem; color:var(--muted); }
+  #elapsed{ margin-top:1.2rem; color:var(--muted); font-size:.9rem; letter-spacing:.1em; }
+
+  /* ---------- results ---------- */
+  #view-results{ max-width:1000px; margin:0 auto; }
+  .stems{ display:grid; grid-template-columns:repeat(auto-fit, minmax(320px,1fr)); gap:1.4rem; }
+  .stem{
+    border:1px solid var(--line); border-radius:18px; padding:1.4rem;
+    background: var(--surface); backdrop-filter: blur(10px);
+    position:relative; overflow:hidden;
+  }
+  .stem::after{ content:""; position:absolute; inset:0 0 auto 0; height:3px; }
+  .stem[data-stem="vocals"]::after{ background:linear-gradient(90deg, var(--vocals), transparent); }
+  .stem[data-stem="instrumental"]::after{ background:linear-gradient(90deg, var(--instr), transparent); }
+  .stem-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; }
+  .stem-name{ font-size:1.15rem; font-weight:700; letter-spacing:-0.01em; display:flex; align-items:center; gap:.55rem; }
+  .stem-name .swatch{ width:.7rem; height:.7rem; border-radius:50%; }
+  .stem[data-stem="vocals"] .swatch{ background:var(--vocals); box-shadow:0 0 10px var(--vocals); }
+  .stem[data-stem="instrumental"] .swatch{ background:var(--instr); box-shadow:0 0 10px var(--instr); }
+  .dl{
+    text-decoration:none; font-size:.82rem; font-weight:600; color:var(--ink);
+    border:1px solid var(--line); border-radius:9px; padding:.45rem .8rem;
+    display:inline-flex; align-items:center; gap:.4rem; transition:border-color .3s var(--expo), background .3s var(--expo);
+  }
+  .dl:hover{ border-color:var(--ink); background:oklch(1 0 0 / .04); }
+  .dl svg{ width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:2; }
+  .viz{ width:100%; height:120px; display:block; border-radius:10px; }
+  .controls{ display:flex; align-items:center; gap:.9rem; margin-top:.9rem; }
+  .play{
+    width:46px; height:46px; flex:none; border-radius:50%; border:none; cursor:pointer;
+    display:grid; place-items:center; color:oklch(0.18 0.02 40); background:var(--ink);
+    transition: transform .3s var(--expo), background .3s var(--expo);
+  }
+  .play:hover{ transform:scale(1.07); }
+  .play svg{ width:18px; height:18px; fill:currentColor; }
+  .scrub{ flex:1; height:6px; border-radius:6px; background:oklch(1 0 0 / .1); cursor:pointer; position:relative; }
+  .scrub-fill{ position:absolute; inset:0 auto 0 0; width:0; border-radius:6px; }
+  .stem[data-stem="vocals"] .scrub-fill{ background:var(--vocals); }
+  .stem[data-stem="instrumental"] .scrub-fill{ background:var(--instr); }
+  .time{ font-size:.78rem; color:var(--muted); min-width:84px; text-align:right; }
+
+  #again{ display:block; margin:2.2rem auto 0; }
+
+  /* ---------- history ---------- */
+  .hist-open{
+    margin-left:auto; background:transparent; border:1px solid var(--line); color:var(--muted);
+    font:inherit; font-size:.8rem; letter-spacing:.04em; padding:.4rem .9rem; border-radius:9px;
+    cursor:pointer; transition:border-color .3s var(--expo), color .3s var(--expo);
+  }
+  .hist-open:hover{ border-color:var(--ink); color:var(--ink); }
+  #view-history{ max-width:820px; margin:0 auto; width:100%; }
+  .hist-title{ font-size:1.8rem; font-weight:700; letter-spacing:-0.02em; margin-bottom:1.4rem; }
+  .hist-card{
+    border:1px solid var(--line); border-radius:16px; padding:1.1rem 1.3rem; margin-bottom:1rem;
+    background:var(--surface); backdrop-filter:blur(10px);
+  }
+  .hist-head{ display:flex; justify-content:space-between; align-items:baseline; gap:1rem; margin-bottom:.7rem; }
+  .hist-name{ font-weight:650; font-size:1.05rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hist-date{ color:var(--muted); font-size:.78rem; flex:none; }
+  .hist-stem{ display:flex; align-items:center; gap:.9rem; padding:.4rem 0; }
+  .hist-stem-name{ width:96px; flex:none; color:var(--muted); font-size:.85rem; text-transform:capitalize; }
+  .hist-stem audio{ flex:1; height:34px; min-width:0; }
+  .hist-empty{ color:var(--muted); text-align:center; padding:2.5rem 0; }
+  #hist-back{ display:block; margin:1.6rem auto 0; }
+
+  footer{ text-align:center; color:var(--muted); font-size:.8rem; padding-top:2rem; letter-spacing:.04em; }
+  footer b{ color:var(--ink); font-weight:600; }
+
+  @media (max-width:560px){
+    .time{ display:none; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .aurora, .drop-icon, .brand .dot, .bars i{ animation:none !important; }
+    .reveal{ opacity:1; transform:none; animation:none; }
+    *{ transition-duration:.01ms !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="aurora"></div>
+  <div class="grain"></div>
+
+  <main>
+    <header class="brand reveal d1">
+      <span class="dot"></span>
+      <span class="label">Vocal Remover · local · GPU</span>
+      <button id="hist-open" class="hist-open">History</button>
+    </header>
+
+    <section id="stage">
+      <!-- UPLOAD -->
+      <div id="view-upload" class="view">
+        <h1 class="reveal d2">Split any song into<br><span class="accent">vocals</span> &amp; instrumental.</h1>
+        <p class="lede reveal d3">Drop a track. It separates on your own machine with Mel-Band Roformer — no upload to the cloud, no limits.</p>
+
+        <label id="drop" class="reveal d4">
+          <input type="file" accept="audio/*" hidden>
+          <div class="drop-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          </div>
+          <div class="drop-title">Drop an audio file</div>
+          <div class="drop-sub">or click to browse — mp3, wav, flac, m4a, ogg</div>
+        </label>
+
+        <div id="filebar" hidden>
+          <span class="fname mono"></span>
+          <button class="btn" id="go">Separate →</button>
+          <button class="btn ghost" id="clear">Clear</button>
+        </div>
+      </div>
+
+      <!-- PROCESSING -->
+      <div id="view-processing" class="view" hidden>
+        <div class="bars" id="procbars"></div>
+        <h2>Separating stems…</h2>
+        <p class="mono" id="proc-file"></p>
+        <p>Running Mel-Band Roformer on your GPU. A typical song takes a few seconds.</p>
+        <div id="elapsed" class="mono">0.0s</div>
+      </div>
+
+      <!-- RESULTS -->
+      <div id="view-results" class="view" hidden>
+        <div class="stems">
+          <article class="stem" data-stem="vocals">
+            <div class="stem-head">
+              <span class="stem-name"><span class="swatch"></span>Vocals</span>
+              <a class="dl" download><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M4 20h16"/></svg>Download</a>
+            </div>
+            <canvas class="viz"></canvas>
+            <div class="controls">
+              <button class="play" aria-label="Play"><svg viewBox="0 0 24 24" class="ico-play"><path d="M8 5v14l11-7z"/></svg></button>
+              <div class="scrub"><div class="scrub-fill"></div></div>
+              <span class="time mono">0:00 / 0:00</span>
+            </div>
+            <audio preload="metadata"></audio>
+          </article>
+
+          <article class="stem" data-stem="instrumental">
+            <div class="stem-head">
+              <span class="stem-name"><span class="swatch"></span>Instrumental</span>
+              <a class="dl" download><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M4 20h16"/></svg>Download</a>
+            </div>
+            <canvas class="viz"></canvas>
+            <div class="controls">
+              <button class="play" aria-label="Play"><svg viewBox="0 0 24 24" class="ico-play"><path d="M8 5v14l11-7z"/></svg></button>
+              <div class="scrub"><div class="scrub-fill"></div></div>
+              <span class="time mono">0:00 / 0:00</span>
+            </div>
+            <audio preload="metadata"></audio>
+          </article>
+        </div>
+        <button class="btn ghost" id="again">Separate another track</button>
+      </div>
+
+      <!-- HISTORY -->
+      <div id="view-history" class="view" hidden>
+        <h2 class="hist-title">Past results</h2>
+        <div id="hist-list"></div>
+        <button class="btn ghost" id="hist-back">Back</button>
+      </div>
+    </section>
+
+    <footer>Powered by <b>Mel-Band Roformer</b> — lossless FLAC, runs entirely on <b>your</b> hardware.</footer>
+  </main>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const views = { upload:$('#view-upload'), processing:$('#view-processing'), results:$('#view-results'), history:$('#view-history') };
+  const show = name => { for (const k in views) views[k].hidden = (k !== name); };
+
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const fmt = t => { t = Math.max(0, t|0); return (t/60|0) + ':' + String(t%60).padStart(2,'0'); };
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const dlUrl = u => u.replace('/file/', '/download/');   // attachment route → triggers a real save (browser + Tauri)
+
+  // processing equalizer bars
+  const pb = $('#procbars');
+  for (let i=0;i<18;i++){ const b=document.createElement('i'); b.style.height='90px'; b.style.animationDelay=(i*0.06)+'s'; pb.appendChild(b); }
+
+  // ---- file selection ----
+  const drop = $('#drop'), input = drop.querySelector('input'), filebar = $('#filebar'), fname = filebar.querySelector('.fname');
+  let file = null;
+  const pick = f => { if(!f) return; file = f; fname.textContent = f.name; filebar.hidden = false; };
+  input.addEventListener('change', e => pick(e.target.files[0]));
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+  drop.addEventListener('drop', e => pick(e.dataTransfer.files[0]));
+  $('#clear').addEventListener('click', () => { file=null; input.value=''; filebar.hidden=true; });
+
+  // ---- separate ----
+  let timer=null, t0=0;
+  $('#go').addEventListener('click', async () => {
+    if (!file) return;
+    $('#proc-file').textContent = file.name;
+    show('processing');
+    t0 = performance.now();
+    timer = setInterval(() => { $('#elapsed').textContent = ((performance.now()-t0)/1000).toFixed(1)+'s'; }, 100);
+
+    try {
+      const fd = new FormData(); fd.append('audio', file);
+      const res = await fetch('/separate', { method:'POST', body:fd });
+      if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || ('HTTP '+res.status));
+      const data = await res.json();
+      loadResults(data);
+      show('results');
+    } catch (err) {
+      alert('Separation failed: ' + err.message);
+      show('upload');
+    } finally {
+      clearInterval(timer);
+    }
+  });
+  $('#again').addEventListener('click', () => { document.querySelectorAll('audio').forEach(a=>a.pause()); show('upload'); });
+
+  // ---- history (past results) ----
+  $('#hist-open').addEventListener('click', openHistory);
+  $('#hist-back').addEventListener('click', () => { document.querySelectorAll('#hist-list audio').forEach(a=>a.pause()); show('upload'); });
+
+  async function openHistory(){
+    document.querySelectorAll('audio').forEach(a=>a.pause());
+    show('history');
+    const list = $('#hist-list');
+    list.innerHTML = '<p class="hist-empty">Loading…</p>';
+    try {
+      const items = await (await fetch('/history')).json();
+      list.innerHTML = items.length ? items.map(histItem).join('')
+                                    : '<p class="hist-empty">No past results yet.</p>';
+    } catch { list.innerHTML = '<p class="hist-empty">Couldn’t load history.</p>'; }
+  }
+  function histItem(it){
+    const dt = new Date(it.created * 1000).toLocaleString();
+    const rows = ['vocals','instrumental'].map(k => {
+      const ext = it[k].split('.').pop();
+      return `<div class="hist-stem"><span class="hist-stem-name">${k}</span>`
+           + `<audio controls preload="none" src="${it[k]}"></audio>`
+           + `<a class="dl" href="${dlUrl(it[k])}" download="${esc(it.name)} - ${k}.${ext}" title="Download">`
+           + `<svg viewBox="0 0 24 24"><path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M4 20h16"/></svg></a></div>`;
+    }).join('');
+    return `<article class="hist-card"><div class="hist-head"><span class="hist-name">${esc(it.name)}</span>`
+         + `<span class="hist-date mono">${esc(dt)}</span></div>${rows}</article>`;
+  }
+
+  // ---- audio + reactive visualizer ----
+  let audioCtx = null;
+  const stems = [...document.querySelectorAll('.stem')].map(setupStem);
+
+  function setupStem(el){
+    const audio = el.querySelector('audio');
+    const canvas = el.querySelector('.viz');
+    const playBtn = el.querySelector('.play');
+    const scrub = el.querySelector('.scrub');
+    const fill = el.querySelector('.scrub-fill');
+    const timeEl = el.querySelector('.time');
+    const color = getComputedStyle(el).getPropertyValue(el.dataset.stem==='vocals' ? '--vocals' : '--instr');
+    const ctx = canvas.getContext('2d');
+    let analyser=null, data=null, srcNode=null;
+
+    function ensureAnalyser(){
+      if (analyser) return;
+      if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      srcNode = audioCtx.createMediaElementSource(audio);
+      analyser = audioCtx.createAnalyser(); analyser.fftSize = 256;
+      srcNode.connect(analyser); analyser.connect(audioCtx.destination);
+      data = new Uint8Array(analyser.frequencyBinCount);
+    }
+
+    function resize(){ const r=canvas.getBoundingClientRect(), dpr=devicePixelRatio||1; canvas.width=r.width*dpr; canvas.height=r.height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }
+    addEventListener('resize', resize); resize();
+
+    let phase=0;
+    function draw(){
+      requestAnimationFrame(draw);
+      const w=canvas.clientWidth, h=canvas.clientHeight;
+      if (w <= 0 || h <= 0) return;   // not laid out yet (e.g. card hidden) — skip frame
+      ctx.clearRect(0,0,w,h);
+      const n=48, gap=3, bw=Math.max(1,(w-(n-1)*gap)/n), mid=h/2;
+      const playing = !audio.paused;
+      if (analyser && playing) analyser.getByteFrequencyData(data);
+      ctx.fillStyle = color.trim();
+      for (let i=0;i<n;i++){
+        let v;
+        if (analyser && playing){ v = data[Math.floor(i/n*data.length)]/255; }
+        else { v = reduce ? 0.12 : (0.10 + 0.08*Math.sin(phase + i*0.5)); } // idle shimmer
+        const bh = Math.max(2, v*(h*0.9));
+        const x = i*(bw+gap);
+        ctx.globalAlpha = 0.35 + 0.65*v;
+        ctx.beginPath();
+        ctx.roundRect(x, mid-bh/2, bw, bh, bw/2);
+        ctx.fill();
+      }
+      ctx.globalAlpha=1;
+      if (!reduce) phase += 0.04;
+    }
+    draw();
+
+    playBtn.addEventListener('click', () => {
+      if (!audio.paused){ audio.pause(); return; }
+      stems.forEach(s => s !== api && s.pause());
+      // Start playback FIRST and unconditionally — the visualizer is decoration and
+      // must never block it. (Awaiting audioCtx.resume() here can hang when the context
+      // can't start, e.g. in some webviews, leaving the track silent.)
+      audio.play().catch(e => console.error('playback failed:', e));
+      try {
+        ensureAnalyser();
+        if (audioCtx.state === 'suspended') audioCtx.resume();  // fire-and-forget
+      } catch (e) { console.warn('visualizer unavailable:', e); }
+    });
+    const setIcon = () => playBtn.innerHTML = audio.paused
+      ? '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'
+      : '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
+    audio.addEventListener('play', setIcon); audio.addEventListener('pause', setIcon);
+    audio.addEventListener('timeupdate', () => {
+      const d=audio.duration||0;
+      fill.style.width = (d ? audio.currentTime/d*100 : 0)+'%';
+      timeEl.textContent = fmt(audio.currentTime)+' / '+fmt(d);
+    });
+    audio.addEventListener('loadedmetadata', () => { timeEl.textContent = '0:00 / '+fmt(audio.duration||0); });
+    scrub.addEventListener('click', e => { const r=scrub.getBoundingClientRect(); audio.currentTime=(e.clientX-r.left)/r.width*(audio.duration||0); });
+
+    const api = { pause:()=>audio.pause(), el, audio };
+    return api;
+  }
+
+  function loadResults(data){
+    document.querySelectorAll('.stem').forEach(el => {
+      const key = el.dataset.stem;          // 'vocals' | 'instrumental'
+      const url = data[key] + '?t=' + Date.now();
+      el.querySelector('audio').src = url;
+      const dl = el.querySelector('.dl');
+      dl.href = dlUrl(data[key]);
+      const ext = data[key].split('?')[0].split('.').pop() || 'flac';   // match actual output format
+      dl.setAttribute('download', `${data.name} - ${key}.${ext}`);
+    });
+  }
+})();
+</script>
+</body>
+</html>

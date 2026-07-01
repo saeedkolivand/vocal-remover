@@ -1,0 +1,8 @@
+{
+  "name": "backend",
+  "private": true,
+  "scripts": {
+    "dev": "node run.mjs app.py",
+    "test": "node run.mjs selfcheck.py"
+  }
+}

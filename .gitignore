@@ -1,0 +1,37 @@
+# node / turbo
+node_modules/
+.turbo/
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# rust / tauri build output (src-tauri/.gitignore also covers /target)
+/src-tauri/target/
+
+# runtime data (generated per job, not source)
+output/
+uploads/
+
+# downloaded ML model cache (~870 MB, auto-fetched by audio-separator)
+models/
+
+# PyInstaller sidecar build output (multi-GB)
+sidecar/
+build/
+*.spec.bak
+
+# assembled portable distributable (multi-GB)
+release-portable/
+dist-portable/
+*.zip
+
+# local tooling / editor / os
+.impeccable/
+.claude/settings.local.json
+*.log
+.DS_Store
+Thumbs.db
+
+# keep: dist/ (hand-written Tauri splash), pnpm-lock.yaml, Cargo.lock

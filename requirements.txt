@@ -1,0 +1,12 @@
+# Install order matters — audio-separator[gpu] pulls a CPU torch, so install it
+# FIRST, then force the CUDA build on top (RTX 4090 / CUDA 12.x):
+#
+#   pip install -r requirements.txt
+#   pip install --force-reinstall --no-deps torch torchvision \
+#       --index-url https://download.pytorch.org/whl/cu128
+#
+# Verify GPU:  python -c "import torch; print(torch.cuda.is_available())"  -> True
+flask
+audio-separator[gpu]   # BS-RoFormer / Mel-Band RoFormer engine (SOTA)
+static-ffmpeg          # bundles ffmpeg for decode + mp3 encode
+pywebview              # desktop app only (desktop.py); not needed for browser use
