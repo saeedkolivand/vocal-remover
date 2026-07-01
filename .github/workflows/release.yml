@@ -71,10 +71,9 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          # Windows: DirectML torch → runs the model on ANY GPU (incl. NVIDIA) without
-          # the multi-GB CUDA runtime. macOS: CPU/MPS. Device is picked at runtime.
-          if [ "$RUNNER_OS" = "Windows" ]; then EXTRA=dml; else EXTRA=cpu; fi
-          pip install flask "audio-separator[$EXTRA]" static-ffmpeg pyinstaller
+          # CPU/MPS torch (works everywhere, fits GitHub's 2GB limit). DirectML was
+          # tried but crashes on RoFormer's STFT/complex ops; CUDA is a separate build.
+          pip install flask "audio-separator[cpu]" static-ffmpeg pyinstaller
           pyinstaller vr-backend.spec --distpath sidecar --noconfirm
 
       - name: Resolve release id

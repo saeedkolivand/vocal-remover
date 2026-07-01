@@ -100,11 +100,6 @@ def _load_model():
             output_format="flac",          # lossless — avoids the second lossy pass MP3 adds
             output_dir=str(OUT),
             model_file_dir=str(MODELS),    # stable cache, not /tmp
-            # Device priority (audio-separator): CUDA > MPS > DirectML > CPU. This flag
-            # only matters when torch_directml is installed and there's no CUDA/MPS —
-            # i.e. the packaged Windows build, where it runs the model on ANY GPU
-            # (incl. NVIDIA) via DirectX. Harmless in the CUDA dev env (CUDA wins).
-            use_directml=True,
             # `overlap` is the chunk STEP in seconds: lower = more overlap = fewer seam
             # artifacts (and slower). ~2s step on ~6s chunks ≈ 66% overlap; the 4090 eats it.
             mdxc_params={"segment_size": 256, "override_model_segment_size": False,
