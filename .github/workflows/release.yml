@@ -74,6 +74,11 @@ jobs:
           # CPU/MPS torch (works everywhere, fits GitHub's 2GB limit). DirectML was
           # tried but crashes on RoFormer's STFT/complex ops; CUDA is a separate build.
           pip install flask "audio-separator[cpu]" static-ffmpeg pyinstaller
+          # static-ffmpeg's wheel ships NO binaries — it lazily downloads ffmpeg/ffprobe
+          # on the first add_paths() call. Trigger that download HERE so collect_all bakes
+          # them into the sidecar; otherwise the user's first launch fetches ffmpeg into the
+          # install dir (fails on read-only installs) and the app hangs on the splash.
+          python -c "import static_ffmpeg; static_ffmpeg.add_paths()"
           pyinstaller vr-backend.spec --distpath sidecar --noconfirm
 
       - name: Resolve release id

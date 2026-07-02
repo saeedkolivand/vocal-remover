@@ -8,5 +8,5 @@
 # Verify GPU:  python -c "import torch; print(torch.cuda.is_available())"  -> True
 flask
 audio-separator[gpu]   # BS-RoFormer / Mel-Band RoFormer engine (SOTA)
-static-ffmpeg          # bundles ffmpeg for decode + mp3 encode
+static-ffmpeg          # provides ffmpeg for decode + flac encode (downloads binaries on first use; CI bakes them into the sidecar)
 pywebview              # desktop app only (desktop.py); not needed for browser use

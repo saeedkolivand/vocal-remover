@@ -62,16 +62,34 @@ MODELS = _models_dir()
 #   Alternatives: mel_band_roformer_kim_ft2_unwa.ckpt     (newer FT)
 #                 bs_roformer_vocals_revive_v2_unwa.ckpt  (fuller vocals)
 MODEL = os.environ.get("MODEL", "mel_band_roformer_kim_ft_unwa.ckpt")
+TOTAL_MB = 871  # ~size of the Kim FT checkpoint — lets the first-run bar show a real %
+
+
+def _device():
+    """'gpu' if CUDA/MPS is usable, else 'cpu'. Drives the UI copy and the separation
+    overlap (a CPU can't afford the GPU's 66% chunk overlap)."""
+    try:
+        import torch
+        if torch.cuda.is_available() or (
+                getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()):
+            return "gpu"
+    except Exception:
+        pass
+    return "cpu"
+
+
+DEVICE = _device()
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024  # 300 MB upload cap
 
-# The model loads (and, on first run, downloads ~200 MB+) in a background thread so
+# The model loads (and, on first run, downloads ~900 MB) in a background thread so
 # Flask serves immediately and the UI can show progress via /status instead of a
 # frozen window. split() and /separate wait on MODEL_READY.
 separator = None
 MODEL_READY = threading.Event()
-status = {"ready": False, "phase": "starting", "downloaded_mb": 0.0, "error": None}
+status = {"ready": False, "phase": "starting", "downloaded_mb": 0.0,
+          "total_mb": TOTAL_MB, "device": DEVICE, "error": None}
 
 
 def _watch_download():
@@ -101,20 +119,38 @@ def _load_model():
             output_dir=str(OUT),
             model_file_dir=str(MODELS),    # stable cache, not /tmp
             # `overlap` is the chunk STEP in seconds: lower = more overlap = fewer seam
-            # artifacts (and slower). ~2s step on ~6s chunks ≈ 66% overlap; the 4090 eats it.
+            # artifacts (and slower). ~2s step ≈ 66% overlap, which a GPU eats; on CPU that
+            # is minutes per song, so step wider there (fewer passes) to keep it usable.
             mdxc_params={"segment_size": 256, "override_model_segment_size": False,
-                         "batch_size": 1, "overlap": 2, "pitch_shift": 0},
+                         "batch_size": 1, "overlap": 2 if DEVICE == "gpu" else 4,
+                         "pitch_shift": 0},
         )
         sep.load_model(model_filename=MODEL)
         separator = sep
         status.update(phase="ready", ready=True)
     except Exception as e:
+        # A killed/interrupted first-run download leaves a truncated .ckpt that torch can't
+        # deserialize — and since "file exists" counts as cached, every later launch would
+        # re-hit it and the app would be bricked forever. Delete it so a retry (or relaunch)
+        # re-downloads cleanly. ponytail: nuke-on-failure; worst case is one wasted re-download
+        # if a genuine (non-corruption) load bug ever trips this.
+        try:
+            (MODELS / MODEL).unlink(missing_ok=True)
+        except OSError:
+            pass
         status.update(phase="error", error=str(e))
     finally:
         MODEL_READY.set()  # unblock waiters whether we succeeded or errored
 
 
-threading.Thread(target=_load_model, daemon=True).start()
+def start_load():
+    """(Re)start model loading from a clean status — used at boot and by POST /retry."""
+    status.update(ready=False, phase="starting", downloaded_mb=0.0, error=None)
+    MODEL_READY.clear()
+    threading.Thread(target=_load_model, daemon=True).start()
+
+
+start_load()
 
 # ponytail: one GPU, so serialize jobs with a lock — also guards the shared
 # separator.output_dir we set per job. Add a real queue only if this ever
@@ -172,7 +208,11 @@ LOADING_HTML = """<!doctype html><meta charset=utf-8>
   .bar{margin-top:1.2rem;height:4px;border-radius:99px;background:oklch(0.30 0.02 235);overflow:hidden}
   .bar>i{display:block;height:100%;width:35%;border-radius:99px;background:oklch(0.82 0.17 52);
     animation:slide 1.4s ease-in-out infinite}
+  .bar>i.det{animation:none;margin-left:0;transition:width .4s ease}
   @keyframes slide{0%{margin-left:-40%}100%{margin-left:100%}}
+  .btn{margin-top:1.4rem;display:none;font:inherit;font-weight:600;cursor:pointer;
+    color:oklch(0.15 0.012 235);background:oklch(0.82 0.17 52);border:none;border-radius:10px;padding:.6rem 1.4rem}
+  .btn:hover{filter:brightness(1.06)}
   @media (prefers-reduced-motion:reduce){.aurora,.dot,.bar>i{animation:none}}
 </style>
 <div class=aurora></div>
@@ -180,19 +220,38 @@ LOADING_HTML = """<!doctype html><meta charset=utf-8>
   <div class=dot></div>
   <h1 id=t>Starting Vocal Remover…</h1>
   <p id=m>Warming up the engine.</p>
-  <div class=bar><i></i></div>
+  <div class=bar><i id=bi></i></div>
+  <button id=retry class=btn onclick="doRetry()">Try again</button>
 </div>
 <script>
-const t=document.getElementById('t'),m=document.getElementById('m');
+const t=document.getElementById('t'),m=document.getElementById('m'),
+      bi=document.getElementById('bi'),retry=document.getElementById('retry');
+function friendly(err){
+  return /Connection|Max retries|Failed to establish|getaddrinfo|Temporary failure|NewConnectionError/i.test(err||'')
+    ? 'No internet connection — the one-time ~900 MB model download needs one.'
+    : (err||'The backend could not load the model.');
+}
+async function doRetry(){
+  retry.style.display='none';
+  try{ await fetch('/retry',{method:'POST'}); }catch(e){}
+  tick();
+}
 async function tick(){
   try{
     const s=await (await fetch('/status',{cache:'no-store'})).json();
     if(s.ready){location.reload();return}
-    if(s.phase==='downloading'){t.textContent='Downloading AI model…';
-      m.textContent='One-time download'+(s.downloaded_mb?' — '+s.downloaded_mb+' MB':'')+'. This can take a minute.';}
-    else if(s.phase==='loading'){t.textContent='Loading model…';m.textContent='Almost there.';}
-    else if(s.phase==='error'){t.textContent='Failed to start';
-      m.textContent=s.error||'The backend could not load the model.';return;}
+    if(s.phase==='downloading'){
+      t.textContent='Downloading AI model…';
+      const pct=s.total_mb?Math.min(99,Math.round(s.downloaded_mb/s.total_mb*100)):0;
+      m.textContent='One-time download — '+(s.downloaded_mb||0)+' of '+(s.total_mb||'?')+' MB'+(pct?' ('+pct+'%)':'');
+      bi.classList.add('det'); bi.style.width=pct+'%';
+    }
+    else if(s.phase==='loading'){t.textContent='Loading model…';m.textContent='Almost there.';
+      bi.classList.remove('det'); bi.style.width='';}
+    else if(s.phase==='error'){t.textContent='Couldn’t start';
+      m.textContent=friendly(s.error); bi.classList.add('det'); bi.style.width='0%';
+      retry.style.display='inline-block'; return;}
+    else{bi.classList.remove('det'); bi.style.width='';}
   }catch(e){/* backend still booting */}
   setTimeout(tick,600);
 }
@@ -212,6 +271,14 @@ def index():
 
 @app.get("/status")
 def status_route():
+    return jsonify(status)
+
+
+@app.post("/retry")
+def retry_route():
+    # Re-attempt a failed load (e.g. the first-run download dropped). No-op unless errored.
+    if status["phase"] == "error":
+        start_load()
     return jsonify(status)
 
 
@@ -284,6 +351,17 @@ def history():
         })
     items.sort(key=lambda x: x["created"], reverse=True)
     return jsonify(items)
+
+
+@app.delete("/history/<job>")
+def history_delete(job):
+    """Delete a past result to reclaim disk (stems accumulate forever otherwise).
+    Resolve + parent-check so a crafted job id can't escape the output dir."""
+    d = (OUT / job).resolve()
+    if d.parent != OUT.resolve() or not d.is_dir():
+        return jsonify(error="not found"), 404
+    shutil.rmtree(d, ignore_errors=True)
+    return jsonify(ok=True)
 
 
 if __name__ == "__main__":

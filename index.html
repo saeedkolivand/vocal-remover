@@ -205,6 +205,11 @@
   .hist-stem-name{ width:96px; flex:none; color:var(--muted); font-size:.85rem; text-transform:capitalize; }
   .hist-stem audio{ flex:1; height:34px; min-width:0; }
   .hist-empty{ color:var(--muted); text-align:center; padding:2.5rem 0; }
+  .hist-meta{ display:flex; align-items:center; gap:.8rem; flex:none; }
+  .hist-del{ background:transparent; border:none; cursor:pointer; color:var(--muted); padding:.2rem;
+    display:inline-flex; border-radius:8px; transition:color .3s var(--expo), background .3s var(--expo); }
+  .hist-del:hover{ color:var(--vocals); background:oklch(1 0 0 / .05); }
+  .hist-del svg{ width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; }
   #hist-back{ display:block; margin:1.6rem auto 0; }
 
   footer{ text-align:center; color:var(--muted); font-size:.8rem; padding-top:2rem; letter-spacing:.04em; }
@@ -258,7 +263,7 @@
         <div class="bars" id="procbars"></div>
         <h2>Separating stems…</h2>
         <p class="mono" id="proc-file"></p>
-        <p>Running Mel-Band Roformer on your GPU. A typical song takes a few seconds.</p>
+        <p id="proc-note">Running Mel-Band Roformer locally. This can take a moment.</p>
         <div id="elapsed" class="mono">0.0s</div>
       </div>
 
@@ -313,6 +318,15 @@
   const views = { upload:$('#view-upload'), processing:$('#view-processing'), results:$('#view-results'), history:$('#view-history') };
   const show = name => { for (const k in views) views[k].hidden = (k !== name); };
 
+  // Tailor the processing note to the compute device the backend reports (the shipped
+  // build is CPU; a local CUDA build is seconds-fast — don't promise GPU speed on CPU).
+  fetch('/status').then(r => r.json()).then(s => {
+    const p = $('#proc-note'); if (!p) return;
+    p.textContent = s.device === 'gpu'
+      ? 'Running Mel-Band Roformer on your GPU. A typical song takes a few seconds.'
+      : 'Running Mel-Band Roformer on your CPU. Expect a few minutes per song.';
+  }).catch(() => {});
+
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const fmt = t => { t = Math.max(0, t|0); return (t/60|0) + ':' + String(t%60).padStart(2,'0'); };
   const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -361,6 +375,16 @@
   $('#hist-open').addEventListener('click', openHistory);
   $('#hist-back').addEventListener('click', () => { document.querySelectorAll('#hist-list audio').forEach(a=>a.pause()); show('upload'); });
 
+  // Delete a past result (delegated — cards are rendered dynamically).
+  $('#hist-list').addEventListener('click', async e => {
+    const btn = e.target.closest('.hist-del'); if (!btn) return;
+    const card = btn.closest('.hist-card'), job = card && card.dataset.job;
+    if (!job || !confirm('Delete this result? This removes the saved stems.')) return;
+    card.querySelectorAll('audio').forEach(a => a.pause());
+    try { await fetch('/history/' + encodeURIComponent(job), { method:'DELETE' }); card.remove(); }
+    catch { alert('Could not delete.'); }
+  });
+
   async function openHistory(){
     document.querySelectorAll('audio').forEach(a=>a.pause());
     show('history');
@@ -381,8 +405,12 @@
            + `<a class="dl" href="${dlUrl(it[k])}" download="${esc(it.name)} - ${k}.${ext}" title="Download">`
            + `<svg viewBox="0 0 24 24"><path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M4 20h16"/></svg></a></div>`;
     }).join('');
-    return `<article class="hist-card"><div class="hist-head"><span class="hist-name">${esc(it.name)}</span>`
-         + `<span class="hist-date mono">${esc(dt)}</span></div>${rows}</article>`;
+    return `<article class="hist-card" data-job="${esc(it.job)}"><div class="hist-head">`
+         + `<span class="hist-name">${esc(it.name)}</span>`
+         + `<span class="hist-meta"><span class="hist-date mono">${esc(dt)}</span>`
+         + `<button class="hist-del" title="Delete result" aria-label="Delete result">`
+         + `<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13"/></svg>`
+         + `</button></span></div>${rows}</article>`;
   }
 
   // ---- audio + reactive visualizer ----

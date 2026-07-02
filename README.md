@@ -57,8 +57,9 @@ The backend calls `separator.load_model()` at startup. Where the model comes fro
 - **Bundled** (full self-contained build): the model ships as a Tauri resource,
   gets mirrored into a writable cache on first launch → **no download**.
 - **Not bundled** (dev, or the CI shell installers): `app.py` finds no local model
-  and [audio-separator] **downloads it on first run** (~200 MB), cached in `./models`
-  (or `MODEL_DIR`). One-time; later launches are instant.
+  and [audio-separator] **downloads it on first run** (~900 MB), cached in `./models`
+  (or `MODEL_DIR`). One-time; later launches are instant. First run therefore needs
+  internet; the loading page shows a determinate progress bar.
 
 The model is gitignored, so the CI builds deliberately don't bundle it (shell only)
 — on those, the first launch of the local Python backend triggers that download.
