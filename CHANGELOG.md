@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/saeedkolivand/vocal-remover/compare/v1.2.1...v1.3.0) (2026-07-02)
+
+
+### Features
+
+* zero-prerequisite install hardening across platforms ([6b87f11](https://github.com/saeedkolivand/vocal-remover/commit/6b87f11e8d3c66961579b533d533f534b3f4a008))
+
 ## [1.2.1](https://github.com/saeedkolivand/vocal-remover/compare/v1.2.0...v1.2.1) (2026-07-01)
 
 
