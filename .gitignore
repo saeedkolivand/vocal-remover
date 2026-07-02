@@ -33,5 +33,7 @@ dist-portable/
 *.log
 .DS_Store
 Thumbs.db
+graphify-out
+.codegraph
 
 # keep: dist/ (hand-written Tauri splash), pnpm-lock.yaml, Cargo.lock
