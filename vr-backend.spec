@@ -9,6 +9,7 @@ datas, binaries, hiddenimports = [], [], []
 # torch / onnxruntime / numpy / scipy are handled by PyInstaller's built-in hooks.
 for pkg in (
     "audio_separator", "static_ffmpeg",
+    "torch_directml",  # Windows GPU (any vendor) via DirectX; absent on the mac/cpu build (skipped)
     "rotary_embedding_torch", "einops", "ml_collections", "beartype",
     "librosa", "soundfile", "soxr", "samplerate", "resampy",
     "demucs", "julius", "lameenc", "diffq", "omegaconf", "dora_search",
@@ -21,6 +22,9 @@ for pkg in (
         print(f"[spec] skip {pkg}: {e}")
 
 datas += [("index.html", ".")]  # served at "/"
+
+# app.py imports dml_hybrid conditionally (Windows GPU path) — bundle it explicitly.
+hiddenimports += ["dml_hybrid"]
 
 # audio-separator loads these by name at runtime
 hiddenimports += [

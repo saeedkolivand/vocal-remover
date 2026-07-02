@@ -65,20 +65,30 @@ MODEL = os.environ.get("MODEL", "mel_band_roformer_kim_ft_unwa.ckpt")
 TOTAL_MB = 871  # ~size of the Kim FT checkpoint — lets the first-run bar show a real %
 
 
-def _device():
-    """'gpu' if CUDA/MPS is usable, else 'cpu'. Drives the UI copy and the separation
-    overlap (a CPU can't afford the GPU's 66% chunk overlap)."""
+def _accel():
+    """Which compute backend the model will use: cuda / mps / directml / cpu.
+    DirectML (any Windows GPU — NVIDIA/AMD/Intel) needs use_directml=True on the Separator
+    plus the dml_hybrid patch (DirectML can't run the model's complex STFT). Drives the UI
+    copy and the separation overlap."""
     try:
         import torch
-        if torch.cuda.is_available() or (
-                getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()):
-            return "gpu"
+        if torch.cuda.is_available():
+            return "cuda"
+        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    try:
+        import torch_directml
+        if torch_directml.is_available():
+            return "directml"
     except Exception:
         pass
     return "cpu"
 
 
-DEVICE = _device()
+ACCEL = _accel()
+DEVICE = "gpu" if ACCEL in ("cuda", "mps", "directml") else "cpu"  # for the UI
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024  # 300 MB upload cap
@@ -107,6 +117,37 @@ def _watch_download():
         time.sleep(0.5)
 
 
+def _make_separator(use_dml):
+    sep = Separator(
+        output_format="flac",          # lossless — avoids the second lossy pass MP3 adds
+        output_dir=str(OUT),
+        model_file_dir=str(MODELS),    # stable cache, not /tmp
+        use_directml=use_dml,          # route torch to the DirectML device on Windows GPUs
+        # `overlap` is the chunk STEP in seconds: lower = more overlap = fewer seam artifacts
+        # (and slower). ~2s ≈ 66% overlap, which native CUDA/MPS eat; on DirectML (CPU-side
+        # STFT per chunk) and CPU we step wider to stay usable.
+        mdxc_params={"segment_size": 256, "override_model_segment_size": False,
+                     "batch_size": 1, "overlap": 2 if ACCEL in ("cuda", "mps") else 4,
+                     "pitch_shift": 0},
+    )
+    sep.load_model(model_filename=MODEL)
+    return sep
+
+
+def _dml_selftest_ok(sep):
+    """One tiny forward on the GPU. DirectML op coverage is uniform across GPU vendors, but
+    we can only test some hardware — if the GPU path doesn't actually run here, the caller
+    falls back to CPU so the app is never worse than the plain CPU build."""
+    try:
+        import torch
+        with torch.no_grad():
+            sep.model_instance.model_run(torch.randn(1, 2, 44100, device=sep.torch_device))
+        return True
+    except Exception as e:
+        print(f"DirectML self-test failed ({e}); falling back to CPU", flush=True)
+        return False
+
+
 def _load_model():
     global separator
     try:
@@ -114,18 +155,18 @@ def _load_model():
         status["phase"] = "loading" if cached else "downloading"
         if not cached:
             threading.Thread(target=_watch_download, daemon=True).start()
-        sep = Separator(
-            output_format="flac",          # lossless — avoids the second lossy pass MP3 adds
-            output_dir=str(OUT),
-            model_file_dir=str(MODELS),    # stable cache, not /tmp
-            # `overlap` is the chunk STEP in seconds: lower = more overlap = fewer seam
-            # artifacts (and slower). ~2s step ≈ 66% overlap, which a GPU eats; on CPU that
-            # is minutes per song, so step wider there (fewer passes) to keep it usable.
-            mdxc_params={"segment_size": 256, "override_model_segment_size": False,
-                         "batch_size": 1, "overlap": 2 if DEVICE == "gpu" else 4,
-                         "pitch_shift": 0},
-        )
-        sep.load_model(model_filename=MODEL)
+        use_dml = ACCEL == "directml"
+        if use_dml:
+            # DirectML fatally aborts on the model's complex STFT ops; the patch runs those
+            # on CPU and the transformer on the GPU (~5x faster than CPU on any DX12 GPU).
+            import dml_hybrid
+            dml_hybrid.enable()
+        sep = _make_separator(use_dml)
+        if use_dml and not _dml_selftest_ok(sep):
+            import dml_hybrid
+            dml_hybrid.disable()
+            status["device"] = "cpu"        # keep the UI copy honest after fallback
+            sep = _make_separator(False)
         separator = sep
         status.update(phase="ready", ready=True)
     except Exception as e:

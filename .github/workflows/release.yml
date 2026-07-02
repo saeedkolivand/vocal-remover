@@ -71,9 +71,11 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          # CPU/MPS torch (works everywhere, fits GitHub's 2GB limit). DirectML was
-          # tried but crashes on RoFormer's STFT/complex ops; CUDA is a separate build.
-          pip install flask "audio-separator[cpu]" static-ffmpeg pyinstaller
+          # Windows → DirectML torch: runs the model on ANY GPU (NVIDIA/AMD/Intel) via the
+          # dml_hybrid patch (complex STFT on CPU, transformer on the GPU; ~5x over CPU).
+          # macOS → CPU/MPS torch. Both fit GitHub's 2GB limit; CUDA is a separate build.
+          if [ "$RUNNER_OS" = "Windows" ]; then EXTRA=dml; else EXTRA=cpu; fi
+          pip install flask "audio-separator[$EXTRA]" static-ffmpeg pyinstaller
           # static-ffmpeg's wheel ships NO binaries — it lazily downloads ffmpeg/ffprobe
           # on the first add_paths() call. Trigger that download HERE so collect_all bakes
           # them into the sidecar; otherwise the user's first launch fetches ffmpeg into the

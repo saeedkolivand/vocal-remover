@@ -323,7 +323,7 @@
   fetch('/status').then(r => r.json()).then(s => {
     const p = $('#proc-note'); if (!p) return;
     p.textContent = s.device === 'gpu'
-      ? 'Running Mel-Band Roformer on your GPU. A typical song takes a few seconds.'
+      ? 'Running Mel-Band Roformer on your GPU.'
       : 'Running Mel-Band Roformer on your CPU. Expect a few minutes per song.';
   }).catch(() => {});
 

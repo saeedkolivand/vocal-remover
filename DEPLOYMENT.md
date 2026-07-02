@@ -7,13 +7,17 @@ on every platform. The pipeline is described in `README.md`; this file covers th
 ## What ships today
 
 Pushing Conventional Commits to `main` runs `release.yml`: semantic-release cuts a
-version, then each OS runner freezes the Flask backend with PyInstaller (CPU/MPS torch)
+version, then each OS runner freezes the Flask backend with PyInstaller (**Windows:
+DirectML torch** for any-GPU acceleration via `dml_hybrid.py`; **macOS: CPU/MPS torch**)
 and `tauri-action` attaches self-contained installers + `latest.json` to the GitHub
 Release. The desktop app auto-updates from that feed on launch.
 
 Self-contained means the user needs **no Python, no ffmpeg, no runtimes**:
 
 - Python + torch + onnxruntime + libsndfile are frozen into the sidecar.
+- **Windows GPU acceleration** works on any DirectX 12 GPU (NVIDIA/AMD/Intel) via DirectML —
+  no CUDA install, no vendor drivers. `dml_hybrid.py` runs the model's complex STFT on CPU and
+  the transformer on the GPU (~5× faster than CPU); it auto-falls back to CPU if no GPU.
 - **ffmpeg/ffprobe are baked in** — CI runs `static_ffmpeg.add_paths()` before PyInstaller
   so `collect_all` bundles the binaries (they are otherwise downloaded at the user's first
   launch into the install dir, which fails on read-only installs).

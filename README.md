@@ -8,10 +8,10 @@ nothing is uploaded.
 - **Output:** lossless FLAC
 - **UI:** browser or a native desktop app (Tauri)
 
-**Platforms:** NVIDIA GPU (CUDA) is the fast path. The engine auto-detects the
-device, so it also runs on macOS (Apple Silicon MPS / CPU) and CPU-only machines
-— just slower. Only the optional CUDA torch wheel in `requirements.txt` is
-NVIDIA-specific; on macOS install plain torch.
+**Platforms:** the shipped **Windows** build runs on **any GPU** (NVIDIA/AMD/Intel) via
+DirectML (`dml_hybrid.py`); **macOS** uses Apple Silicon MPS / CPU. The engine auto-detects
+the device and falls back to CPU anywhere else. A local NVIDIA **CUDA** build is the fastest
+path (see below) — that's what the optional CUDA torch wheel in `requirements.txt` enables.
 
 ## Run it (dev)
 
@@ -74,10 +74,11 @@ the first-run download shows live MB instead of a frozen window. `/separate` ret
 
 The released installers are **self-contained**: `release.yml` freezes `app.py` into a
 [PyInstaller] sidecar (bundled via `tauri.conf.json` as the app's `backend/` resource)
-so the target needs no Python. To keep it under GitHub's 2 GB release-asset limit and
-run on macOS, the sidecar uses **CPU/MPS torch, not CUDA** — the model is *not* bundled;
-it downloads on first run (see above). Build the same thing on demand with the
-`desktop-build` workflow.
+so the target needs no Python. The **Windows** sidecar uses **DirectML torch** so the model
+runs on any GPU (NVIDIA/AMD/Intel) — the complex STFT ops run on CPU and the transformer on
+the GPU (`dml_hybrid.py`), ~5× faster than CPU; **macOS** uses CPU/MPS torch. Both stay under
+GitHub's 2 GB asset limit. The model is *not* bundled; it downloads on first run (see above).
+Build the same thing on demand with the `desktop-build` workflow.
 
 **NVIDIA "power build" (fastest, biggest):** freeze with the CUDA torch wheel locally
 — multi-GB, so host it off GitHub (or ship the ready-made portable folder in
